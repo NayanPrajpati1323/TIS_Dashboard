@@ -256,7 +256,7 @@ export default function Quotations() {
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Quotations</h1>
-          <p className="text-muted-foreground">Track and manage your quotation proposals</p>
+          {/* <p className="text-muted-foreground">Track and manage your quotation proposals</p> */}
         </div>
         <div className="flex items-center gap-2">
           {selectedQuotations.length > 0 && (
@@ -277,9 +277,9 @@ export default function Quotations() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4">
+      <div className="flex flex-col sm:flex-row gap-4 m-1">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="absolute left-3  top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search"
             value={searchQuery}

@@ -45,6 +45,16 @@ export const testConnection = async () => {
 // Initialize database tables
 export const initializeDatabase = async () => {
   try {
+    // Ensure target database exists before using the pool
+    const bootstrap = await mysql.createConnection({
+      host: dbConfig.host,
+      user: dbConfig.user,
+      password: dbConfig.password,
+      port: dbConfig.port,
+    });
+    await bootstrap.query(`CREATE DATABASE IF NOT EXISTS \`${dbConfig.database}\``);
+    await bootstrap.end();
+
     const connection = await pool.getConnection();
 
     // ✅ No CREATE DATABASE or USE needed — we are already in `dbConfig.database`
@@ -77,23 +87,100 @@ const createTables = async (connection: mysql.PoolConnection) => {
   `);
 
   await connection.query(`
-    CREATE TABLE IF NOT EXISTS profile (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    profile_image VARCHAR(255) DEFAULT NULL, -- store file path or URL
-    name VARCHAR(100) NOT NULL,
-    email VARCHAR(150) NOT NULL UNIQUE,
-    gender ENUM('Male', 'Female', 'Other') NOT NULL,
-    dob DATE NOT NULL,
-    address VARCHAR(255),
-    country VARCHAR(100),
-    state VARCHAR(100),
-    city VARCHAR(100),
-    postal_code VARCHAR(20),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
+    CREATE TABLE IF NOT EXISTS users (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      email VARCHAR(255) NOT NULL UNIQUE,
+      password VARCHAR(255) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
   `);
+
+   await connection.query(`
+    CREATE TABLE IF NOT EXISTS profile (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      -- Columns intentionally minimal here; we'll ensure missing columns below for drift safety
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+   )`);
+
+  // Drift-safety: ensure required columns exist on profile table
+  const [colCheck] = await connection.query<mysql.RowDataPacket[]>(
+    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'profile' AND COLUMN_NAME = 'user_id'`,
+    [dbConfig.database],
+  );
+  if ((colCheck as any[]).length === 0) {
+    // Add user_id column and link to users
+    await connection.query(
+      `ALTER TABLE profile ADD COLUMN user_id INT NOT NULL UNIQUE AFTER id`,
+    );
+  }
+  // Ensure auxiliary columns exist (idempotent guards)
+  const ensureColumn = async (name: string, ddl: string) => {
+    const [exists] = await connection.query<mysql.RowDataPacket[]>(
+      `SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'profile' AND COLUMN_NAME = ?`,
+      [dbConfig.database, name],
+    );
+    if ((exists as any[]).length === 0) {
+      await connection.query(`ALTER TABLE profile ADD COLUMN ${ddl}`);
+    }
+  };
+  await ensureColumn('profile_image', `profile_image VARCHAR(255)`);
+  await ensureColumn('gender', `gender ENUM('Male','Female','Other')`);
+  await ensureColumn('dob', `dob DATE`);
+  await ensureColumn('address', `address VARCHAR(255)`);
+  await ensureColumn('country', `country VARCHAR(255)`);
+  await ensureColumn('state', `state VARCHAR(255)`);
+  await ensureColumn('city', `city VARCHAR(255)`);
+  await ensureColumn('postal_code', `postal_code VARCHAR(20)`);
+  // Ensure FK exists (ignore if already present)
+  try {
+    await connection.query(
+      `ALTER TABLE profile ADD CONSTRAINT fk_profile_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`,
+    );
+  } catch (e) {
+    // likely duplicate constraint; ignore
+  }
+
+  // If profile_image is too small (VARCHAR), upgrade to LONGTEXT to store data URLs
+  const [imgType] = await connection.query<mysql.RowDataPacket[]>(
+    `SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS 
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'profile' AND COLUMN_NAME = 'profile_image'`,
+    [dbConfig.database],
+  );
+  const imgRow = (imgType as any[])[0];
+  if (imgRow && (imgRow.DATA_TYPE === 'varchar' || (imgRow.CHARACTER_MAXIMUM_LENGTH && imgRow.CHARACTER_MAXIMUM_LENGTH < 1000000))) {
+    await connection.query(`ALTER TABLE profile MODIFY COLUMN profile_image LONGTEXT`);
+  }
+
+  // Some environments may have an unexpected NOT NULL 'name' column on profile; relax it
+  const [nameCol] = await connection.query<mysql.RowDataPacket[]>(
+    `SELECT COLUMN_NAME, IS_NULLABLE, COLUMN_DEFAULT FROM INFORMATION_SCHEMA.COLUMNS 
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'profile' AND COLUMN_NAME = 'name'`,
+    [dbConfig.database],
+  );
+  if ((nameCol as any[]).length > 0) {
+    const row = (nameCol as any[])[0];
+    if (row.IS_NULLABLE !== 'YES' || row.COLUMN_DEFAULT !== null) {
+      // Make it nullable with NULL default to avoid strict-mode insert failures when omitted
+      await connection.query(`ALTER TABLE profile MODIFY COLUMN name VARCHAR(255) NULL DEFAULT NULL`);
+    }
+  }
+
+  // Relax unexpected NOT NULL 'email' column on profile if present
+  const [emailCol] = await connection.query<mysql.RowDataPacket[]>(
+    `SELECT COLUMN_NAME, IS_NULLABLE, COLUMN_DEFAULT FROM INFORMATION_SCHEMA.COLUMNS 
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'profile' AND COLUMN_NAME = 'email'`,
+    [dbConfig.database],
+  );
+  if ((emailCol as any[]).length > 0) {
+    const row = (emailCol as any[])[0];
+    if (row.IS_NULLABLE !== 'YES' || row.COLUMN_DEFAULT !== null) {
+      await connection.query(`ALTER TABLE profile MODIFY COLUMN email VARCHAR(255) NULL DEFAULT NULL`);
+    }
+  }
   await connection.query(`
     CREATE TABLE IF NOT EXISTS categories (
       id INT AUTO_INCREMENT PRIMARY KEY,

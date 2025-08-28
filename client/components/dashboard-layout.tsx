@@ -1,4 +1,4 @@
-import { Children, useState } from "react";
+import { Children, useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -303,13 +303,34 @@ interface DashboardLayoutProps {
 }
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [profileImageUrl, setProfileImageUrl] = useState("/placeholder.svg")
   const [expandedItems, setExpandedItems] = useState<string[]>([
     "Dashboard",
     "Super Admin",
     "Applications",
   ]);
-  const location = useLocation();
+  const routerLocation = useLocation();
+
+  useEffect(() => {
+    const fetchProfileImage = async () => {
+      // NOTE: Assumes the logged-in user's ID is stored in localStorage.
+      // This should be set upon successful login.
+      const userId = localStorage.getItem("userId");
+      if (userId) {
+        try {
+          const response = await fetch(`/api/profile/${userId}`);
+          const result = await response.json();
+          if (result.success && result.data.profile?.profile_image) {
+            setProfileImageUrl(result.data.profile.profile_image);
+          }
+        } catch (error) {
+          console.error("Failed to fetch profile image:", error);
+        }
+      }
+    };
+    fetchProfileImage();
+  }, [routerLocation.pathname]); // Refetch when path changes
   const { theme, setTheme } = useTheme();
 
   const toggleExpanded = (title: string) => {
@@ -381,7 +402,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Sidebar */}
       <div
         className={cn(
-          "fixed inset-y-0 left-0 lg:left-14 z-50 w-52 lg:w-50 border-l border-gray-300 bg-sidebar border-r border-sidebar-border transform transition-transform duration-300 ease-in-out lg:translate-x-0 overflow-hidden",
+          "fixed inset-y-0 left-0 lg:left-14 z-50 w-52 lg:w-50 border-l border-gray-500 bg-sidebar border-r border-sidebar-border transform transition-transform duration-300 ease-in-out lg:translate-x-0 overflow-hidden",
           sidebarOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
@@ -439,7 +460,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                                   to={grandchild.href!}
                                   className={cn(
                                     "flex items-center m-0 px-2 py-2 h-6 text-xs transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground border-l-2 border-sidebar-border",
-                                    location.pathname === grandchild.href
+                                    routerLocation.pathname === grandchild.href
                                       ? "bg-sidebar-primary text-sidebar-primary-foreground"
                                       : "text-sidebar-foreground",
                                   )}
@@ -455,7 +476,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                           to={child.href!}
                           className={cn(
                             " ml-4 h-6 flex items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground border-l-2 border-sidebar-border border-blue-900",
-                            location.pathname === child.href
+                            routerLocation.pathname === child.href
                               ? "bg-sidebar-primary text-sidebar-primary-foreground"
                               : "text-sidebar-foreground",
                           )}
@@ -473,10 +494,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             {/* Login Section */}
             <div className="space-y-1">
               <Link
-                to="/Profile"
+                to="/profile"
                 className={cn(
                   "flex items-center font-semibold gap-2 rounded-md ml-4 h-6 px-3 py-2 text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground border-l-2 border-sidebar-border border-blue-900",
-                  location.pathname === "/login"
+                  routerLocation.pathname === "/login"
                     ? "bg-sidebar-primary text-sidebar-primary-foreground"
                     : "text-sidebar-foreground",
                 )}
@@ -485,15 +506,15 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 Profile
               </Link>
             </div>
-            <div className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-muted-foreground  tracking-wider">
+            {/* <div className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-muted-foreground  tracking-wider">
               <span>Authentication</span>
-            </div>
-            <div className="space-y-1">
+            </div> */}
+            {/* <div className="space-y-1">
               <Link
                 to="/login"
                 className={cn(
                   "flex items-center font-semibold gap-2 rounded-md ml-4 h-6 px-3 py-2 text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground border-l-2 border-sidebar-border border-blue-900",
-                  location.pathname === "/login"
+                  routerLocation.pathname === "/login"
                     ? "bg-sidebar-primary text-sidebar-primary-foreground"
                     : "text-sidebar-foreground",
                 )}
@@ -501,7 +522,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 <User className="h-4 w-4" />
                 Login
               </Link>
-            </div>
+            </div> */}
           </nav>
         </div>
       </div>
@@ -509,7 +530,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Main content */}
       <div className="lg:pl-[16rem]">
         {/* Header */}
-        <header className="sticky top-0 z-30 flex h-12 lg:h-14 items-center gap-2 lg:gap-4 border-b bg-card px-2 sm:px-4 lg:px-6 overflow-x-auto">
+        <header className="sticky top-0 z-30 flex h-12 lg:h-14 items-center gap-2 lg:gap-4 border-b  px-2 sm:px-4 lg:px-6 overflow-x-auto">
           <Button
             variant="ghost"
             size="icon"
@@ -529,9 +550,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             <span className="font-semibold hidden sm:inline">Home</span>
             <span className="hidden sm:inline">/</span>
             <span className="text-foreground font-semibold text-xs lg:text-sm">
-              {location.pathname === "/"
+              {routerLocation.pathname === "/"
                 ? "Dashboard"
-                : location.pathname.split("/").pop()}
+                : routerLocation.pathname.split("/").pop()}
             </span>
           </div>
 
@@ -593,7 +614,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   className="relative h-6 w-6 lg:h-8 lg:w-8 rounded-full"
                 >
                   <Avatar className="h-6 w-6 lg:h-8 lg:w-8">
-                    <AvatarImage src="/placeholder.svg" alt="User" />
+                    <AvatarImage src={profileImageUrl} alt="User" />
                     <AvatarFallback className="text-xs">AD</AvatarFallback>
                   </Avatar>
                 </Button>

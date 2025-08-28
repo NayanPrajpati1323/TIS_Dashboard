@@ -18,11 +18,35 @@ export default function Login() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
-    setTimeout(() => {
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err?.error || 'Login failed')
+      }
+
+      const result = await response.json()
+      if (result?.success && result?.data) {
+        localStorage.setItem('isAuthenticated', 'true')
+        localStorage.setItem('currentUser', JSON.stringify(result.data))
+        if (result.data.id) {
+          localStorage.setItem('userId', String(result.data.id))
+        }
+        navigate('/')
+      } else {
+        throw new Error(result?.error || 'Invalid login response')
+      }
+    } catch (err) {
+      console.error('Login error:', err)
+      alert(err instanceof Error ? err.message : 'Login failed')
+    } finally {
       setIsLoading(false)
-      localStorage.setItem("isAuthenticated", "true")
-      navigate("/")
-    }, 1000)
+    }
   }
 
   const handleGoogleLogin = () => {
@@ -43,7 +67,7 @@ export default function Login() {
         <Card className="shadow-2xl border-0 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm">
           <CardContent className="p-8">
             {/* Social Login Buttons */}
-            <div className="space-y-3 mb-6">
+            {/* <div className="space-y-3 mb-6">
               <Button 
                 variant="outline" 
                 onClick={handleGoogleLogin}
@@ -58,9 +82,9 @@ export default function Login() {
                 </svg>
                 Continue with Google
               </Button>
-            </div>
+            </div> */}
 
-            <div className="relative mb-6">
+            {/* <div className="relative mb-6">
               <div className="absolute inset-0 flex items-center">
                 <Separator className="w-full" />
               </div>
@@ -69,7 +93,7 @@ export default function Login() {
                   Or continue with email
                 </span>
               </div>
-            </div>
+            </div> */}
 
             {/* Email/Password Form */}
             <form onSubmit={handleLogin} className="space-y-5">

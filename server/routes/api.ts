@@ -89,6 +89,7 @@ export const getRegister = async (req: Request, res: Response) => {
   }
 } 
 
+
 //Profile routes
 export const getProfile = async (req: Request, res: Response) => {
   try {
@@ -106,7 +107,7 @@ export const getProfile = async (req: Request, res: Response) => {
 export const updateProfile = async (req: Request, res: Response) => {
   try {
     const userId = parseInt(req.params.userId)
-    const result = await DatabaseService.updateProfile(userId, req.body)
+    const result = await DatabaseService.updateProfile(userId, req.body);
     res.json(result)
   } catch (error) {
     res.status(500).json({

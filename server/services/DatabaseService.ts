@@ -17,7 +17,6 @@ import {
 } from "../models";
 import bcrypt from "bcryptjs";
 
-
 interface Unit {
   id: number;
   name: string;
@@ -30,136 +29,93 @@ import { RowDataPacket, ResultSetHeader } from "mysql2";
 
 export class DatabaseService {
   static getLogin() {
-    throw new Error('Method not implemented.');
+    throw new Error("Method not implemented.");
   }
   static getRegister() {
-    throw new Error('Method not implemented.');
+    throw new Error("Method not implemented.");
   }
 
-  static async getProfile(userId: number): Promise<ApiResponse<{ user: User; profile: Profile | {} }>> {
-    try {
-      const [userRows] = await pool.execute<RowDataPacket[]>(
-        "SELECT id, name, email FROM users WHERE id = ?",
-        [userId]
-      );
-
-      if (userRows.length === 0) {
-        return { success: false, error: "User not found" };
-      }
-      const user = userRows[0] as User;
-
-      const [profileRows] = await pool.execute<RowDataPacket[]>(
-        "SELECT * FROM profiles WHERE user_id = ?",
-        [userId],
-      );
-
-      const profile = profileRows.length > 0 ? profileRows[0] : {};
-
-      return {
-        success: true,
-        data: { user, profile: profile as Profile },
-        message: "Profile retrieved successfully",
-      };
-    } catch (error) {
-      console.error("Error fetching profile by user ID:", error);
-      return { success: false, error: "Failed to fetch profile" };
-    }
-  }
-
-  static async updateProfile(userId: number, profileData: Partial<Profile & { name: string }>): Promise<ApiResponse<Profile>> {
+    
+  //registeration operations
+  
+  static async registerUser(
+    user: Omit<User, "id" | "created_at">,
+  ): Promise<ApiResponse<User>> {
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
 
-      // If name is being updated, update it in the users table as well
-      if (profileData.name) {
-        await connection.execute(
-          "UPDATE users SET name = ? WHERE id = ?",
-          [profileData.name, userId]
-        );
+      // Check if user already exists
+      const [existingUsers] = await connection.execute<RowDataPacket[]>(
+        "SELECT id FROM users WHERE email = ?",
+        [user.email],
+      );
+
+      if (existingUsers.length > 0) {
+        await connection.rollback();
+        return { success: false, error: "User with this email already exists" };
       }
 
-      const { profile_image, gender, dob, address } = profileData;
-
-      // Use INSERT ... ON DUPLICATE KEY UPDATE for atomicity
-      await connection.execute(
-        `INSERT INTO profiles (user_id, profile_image, gender, dob, address)
-         VALUES (?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-         profile_image = VALUES(profile_image), gender = VALUES(gender), dob = VALUES(dob), address = VALUES(address)`,
-        [userId, profile_image, gender, dob, address]
+      const hashedPassword = await bcrypt.hash(user.password, 10);
+      const [result] = await connection.execute<ResultSetHeader>(
+        "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
+        [user.name, user.email, hashedPassword],
       );
 
-      const [newOrUpdatedProfile] = await connection.execute<RowDataPacket[]>(
-        "SELECT * FROM profiles WHERE user_id = ?",
-        [userId],
-      );
+      const userId = result.insertId;
 
       await connection.commit();
 
-      return {
-        success: true,
-        data: newOrUpdatedProfile[0] as Profile,
-        message: "Profile saved successfully",
-      };
-    } catch (error) {
-      await connection.rollback();
-      console.error("Error saving profile:", error);
-      return { success: false, error: "Failed to save profile" };
-    } finally {
-      connection.release();
-    }
-  }
-
-  //registeration operations
-  
-  static async registerUser(user: Omit<User, "id" | "created_at">): Promise<ApiResponse<User>> {
-    try {
-      const hashedPassword = await bcrypt.hash(user.password, 10);
-      const [result] = await pool.execute<ResultSetHeader>(
-        "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
-        [user.name, user.email, hashedPassword],
-      );        
-      const [newUser] = await pool.execute<RowDataPacket[]>(
-        "SELECT * FROM users WHERE id = ?",
-        [result.insertId],
+      const [newUserRows] = await pool.execute<RowDataPacket[]>(
+        "SELECT id, name, email, created_at FROM users WHERE id = ?",
+        [userId],
       );
+
       return {
         success: true,
-        data: newUser[0] as User,
+        data: newUserRows[0] as User,
         message: "User registered successfully",
       };
     } catch (error) {
+      await connection.rollback();
       console.error("Error registering user:", error);
+      if (error.code === "ER_DUP_ENTRY") {
+        return { success: false, error: "User with this email already exists" };
+      }
       return {
         success: false,
         error: "Registration failed",
       };
+    } finally {
+      connection.release();
     }
   }
   // Login user
-  
-  static async loginUser(email: string, password: string): Promise<ApiResponse<User>> {
+
+  static async loginUser(
+    email: string,
+    password: string,
+  ): Promise<ApiResponse<User>> {
     try {
       const [rows] = await pool.execute<RowDataPacket[]>(
-        "SELECT * FROM users WHERE email = ? AND password = ?",
-
-        [email, password],
+        "SELECT * FROM users WHERE email = ?",
+        [email],
       );
 
       if (rows.length === 0) {
-        return { success: false, error: "User not found" };
+        return { success: false, error: "Invalid email or password" };
       }
 
       const user = rows[0] as User;
 
       const isPasswordValid = await bcrypt.compare(password, user.password);
       if (!isPasswordValid) {
-        return { success: false, error: "Invalid password" };
+        return { success: false, error: "Invalid email or password" };
       }
 
-      return { success: true, data: user };
-    } catch (error) {     
+      const { password: _, ...userWithoutPassword } = user;
+      return { success: true, data: userWithoutPassword as User };
+    } catch (error) {
       console.error("Error logging in user:", error);
       return { success: false, error: "Login failed" };
     }
@@ -176,7 +132,7 @@ export class DatabaseService {
       console.error("Error fetching user by email:", error);
       return null;
     }
-  } 
+  }
   static async getUserById(id: number): Promise<User | null> {
     try {
       const [rows] = await pool.execute<RowDataPacket[]>(
@@ -188,21 +144,21 @@ export class DatabaseService {
       console.error("Error fetching user by ID:", error);
       return null;
     }
-  } 
+  }
   // Update user
-  static async  updateUser(
+  static async updateUser(
     id: number,
     user: Partial<Omit<User, "id" | "created_at">>,
   ): Promise<ApiResponse<User>> {
     try {
       const [result] = await pool.execute<ResultSetHeader>(
         "UPDATE users SET name = ?, email = ? WHERE id = ?",
-        [ user.name, user.email, id], 
+        [user.name, user.email, id],
       );
 
       if (result.affectedRows === 0) {
         throw new Error("User not found");
-      } 
+      }
       const [updatedUser] = await pool.execute<RowDataPacket[]>(
         "SELECT * FROM users WHERE id = ?",
         [id],
@@ -218,7 +174,7 @@ export class DatabaseService {
       throw error;
     }
   }
-// Delete user
+  // Delete user
   static async deleteUser(id: number): Promise<ApiResponse<void>> {
     try {
       const [result] = await pool.execute<ResultSetHeader>(
@@ -239,7 +195,7 @@ export class DatabaseService {
       throw error;
     }
   }
-  // Add User model methods here 
+  // Add User model methods here
   static async getAllUsers(): Promise<ApiResponse<User[]>> {
     try {
       const [rows] = await pool.execute<RowDataPacket[]>(
@@ -256,7 +212,7 @@ export class DatabaseService {
     }
   }
 
-//change password
+  //change password
   // static async changePassword(
   //   id: number,
   //   oldPassword: string,
@@ -287,9 +243,121 @@ export class DatabaseService {
   // }
 
 
+  // profile operations
+  static async getProfile(
+    userId: number,
+  ): Promise<ApiResponse<{ user: User; profile: Profile | {} }>> {
+    try {
+      const [userRows] = await pool.execute<RowDataPacket[]>(
+        "SELECT id, name, email FROM users WHERE id = ?",
+        [userId],
+      );
 
+      if (userRows.length === 0) {
+        return { success: false, error: "User not found" };
+      }
+      const user = userRows[0] as User;
 
+      const [profileRows] = await pool.execute<RowDataPacket[]>(
+        "SELECT * FROM profile WHERE user_id = ?",
+        [userId],
+      );
 
+      const profile = profileRows.length > 0 ? profileRows[0] : {};
+
+      return {
+        success: true,
+        data: { user, profile: profile as Profile },
+        message: "Profile retrieved successfully",
+      };
+    } catch (error) {
+      console.error("Error fetching profile by user ID:", error);
+      return { success: false, error: "Failed to fetch profile" };
+    }
+  }
+
+  static async updateProfile(
+    userId: number,
+    profileData: Partial<Profile & { name: string }>,
+  ): Promise<ApiResponse<Profile>> {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      // If name is being updated, update it in the users table as well
+      if (profileData.name) {
+        await connection.execute("UPDATE users SET name = ? WHERE id = ?", [
+          profileData.name,
+          userId,
+        ]);
+      }
+
+      const {
+        profile_image,
+        gender,
+        dob,
+        address,
+        country,
+        state,
+        city,
+        postal_code,
+      } = profileData;
+
+      // Normalize values to match DB schema
+      const normalizedGender = gender
+        ? (gender.charAt(0).toUpperCase() + gender.slice(1))
+        : null; // DB expects 'Male' | 'Female' | 'Other'
+      const normalizedDob = !dob || dob === "" ? null : dob; // DB expects DATE or NULL
+
+      // Use INSERT ... ON DUPLICATE KEY UPDATE for atomicity
+      await connection.execute(
+        `INSERT INTO profile (
+          user_id, profile_image, gender, dob, address, country, state, city, postal_code
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          profile_image = VALUES(profile_image),
+          gender = VALUES(gender),
+          dob = VALUES(dob),
+          address = VALUES(address),
+          country = VALUES(country),
+          state = VALUES(state),
+          city = VALUES(city),
+          postal_code = VALUES(postal_code)`,
+        [
+          userId,
+          profile_image ?? null,
+          normalizedGender,
+          normalizedDob,
+          address,
+          country,
+          state,
+          city,
+          postal_code,
+        ],
+      );
+
+      const [newOrUpdatedProfile] = await connection.execute<RowDataPacket[]>(
+        "SELECT * FROM profile WHERE user_id = ?",
+        [userId],
+      );
+
+      await connection.commit();
+
+      return {
+        success: true,
+        data: newOrUpdatedProfile[0] as Profile,
+        message: "Profile saved successfully",
+      };
+    } catch (error) {
+      await connection.rollback();
+      console.error("Error saving profile:", error);
+      const message = error instanceof Error ? error.message : "Failed to save profile";
+      return { success: false, error: message };
+    } finally {
+      connection.release();
+    }
+  }
 
 
   // Customer operations
@@ -312,18 +380,18 @@ export class DatabaseService {
       }
 
       // Use string interpolation for LIMIT and OFFSET to avoid MySQL2 parameter binding issues
-      const limitInt = Math.max(1, Math.min(1000, parseInt(limit.toString()) || 10));
+      const limitInt = Math.max(
+        1,
+        Math.min(1000, parseInt(limit.toString()) || 10),
+      );
       const offsetInt = Math.max(0, parseInt(offset.toString()) || 0);
       query += ` ORDER BY created_at DESC LIMIT ${limitInt} OFFSET ${offsetInt}`;
-      
+
       const countParams = search
         ? [`%${search}%`, `%${search}%`, `%${search}%`]
         : [];
 
-      const [customers] = await pool.execute<RowDataPacket[]>(
-        query,
-        params,
-      );
+      const [customers] = await pool.execute<RowDataPacket[]>(query, params);
       const [countResult] = await pool.execute<RowDataPacket[]>(
         countQuery,
         countParams,
@@ -440,7 +508,7 @@ export class DatabaseService {
     }
   }
 
-  // Product operations 
+  // Product operations
   static async getProducts(
     page = 1,
     limit = 10,
@@ -460,18 +528,18 @@ export class DatabaseService {
       }
 
       // Use string interpolation for LIMIT and OFFSET to avoid MySQL2 parameter binding issues
-      const limitInt = Math.max(1, Math.min(1000, parseInt(limit.toString()) || 10));
+      const limitInt = Math.max(
+        1,
+        Math.min(1000, parseInt(limit.toString()) || 10),
+      );
       const offsetInt = Math.max(0, parseInt(offset.toString()) || 0);
       query += ` ORDER BY created_at DESC LIMIT ${limitInt} OFFSET ${offsetInt}`;
-      
+
       const countParams = search
         ? [`%${search}%`, `%${search}%`, `%${search}%`]
         : [];
 
-      const [products] = await pool.execute<RowDataPacket[]>(
-        query,
-        params,
-      );
+      const [products] = await pool.execute<RowDataPacket[]>(query, params);
       const [countResult] = await pool.execute<RowDataPacket[]>(
         countQuery,
         countParams,
@@ -492,7 +560,7 @@ export class DatabaseService {
   }
 
   static async createProduct(
-    product: Omit<Product, "id" | "created_at" | "updated_at">
+    product: Omit<Product, "id" | "created_at" | "updated_at">,
   ): Promise<ApiResponse<Product>> {
     try {
       const [result] = await pool.execute<ResultSetHeader>(
@@ -586,99 +654,99 @@ export class DatabaseService {
     }
   }
 
- // Category operations
-static async getCategories(): Promise<ApiResponse<Category[]>> {
-  try {
-    const [categories] = await pool.execute<RowDataPacket[]>(
-      "SELECT * FROM categories ORDER BY created_at DESC",
-    );
+  // Category operations
+  static async getCategories(): Promise<ApiResponse<Category[]>> {
+    try {
+      const [categories] = await pool.execute<RowDataPacket[]>(
+        "SELECT * FROM categories ORDER BY created_at DESC",
+      );
 
-    return {
-      success: true,
-      data: categories as Category[],
-      message: "Categories retrieved successfully",
-    };
-  } catch (error) {
-    console.error("Error fetching categories:", error);
-    throw error;
-  }
-}
-
-static async createCategory(
-  category: Omit<Category, "id" | "created_at" | "updated_at">,
-): Promise<ApiResponse<Category>> {
-  try {
-    const [result] = await pool.execute<ResultSetHeader>(
-      "INSERT INTO categories (name, description) VALUES (?, ?)",
-      [category.name, category.description ], 
-    );
-
-    const [newCategory] = await pool.execute<RowDataPacket[]>(
-      "SELECT * FROM categories WHERE id = ?",
-      [result.insertId],
-    );
-
-    return {
-      success: true,
-      data: newCategory[0] as Category,
-      message: "Category created successfully",
-    };
-  } catch (error) {
-    console.error("Error creating category:", error);
-    throw error;
-  }
-}
-
-static async updateCategory(
-  id: number,
-  category: Partial<Omit<Category, "id" | "created_at" | "updated_at">>,
-): Promise<ApiResponse<Category>> {
-  try {
-    const [result] = await pool.execute<ResultSetHeader>(
-      "UPDATE categories SET name = ?, description = ?",
-      [category.name, category.description],
-    );
-
-    if (result.affectedRows === 0) {
-      throw new Error("Category not found");
+      return {
+        success: true,
+        data: categories as Category[],
+        message: "Categories retrieved successfully",
+      };
+    } catch (error) {
+      console.error("Error fetching categories:", error);
+      throw error;
     }
-
-    const [updatedCategory] = await pool.execute<RowDataPacket[]>(
-      "SELECT * FROM categories WHERE id = ?",
-      [id],
-    );
-
-    return {
-      success: true,
-      data: updatedCategory[0] as Category,
-      message: "Category updated successfully",
-    };
-  } catch (error) {
-    console.error("Error updating category:", error);
-    throw error;
   }
-}
 
-static async deleteCategory(id: number): Promise<ApiResponse<void>> {
-  try {
-    const [result] = await pool.execute<ResultSetHeader>(
-      "DELETE FROM categories WHERE id = ?",
-      [id],
-    );
+  static async createCategory(
+    category: Omit<Category, "id" | "created_at" | "updated_at">,
+  ): Promise<ApiResponse<Category>> {
+    try {
+      const [result] = await pool.execute<ResultSetHeader>(
+        "INSERT INTO categories (name, description) VALUES (?, ?)",
+        [category.name, category.description],
+      );
 
-    if (result.affectedRows === 0) {
-      throw new Error("Category not found");
+      const [newCategory] = await pool.execute<RowDataPacket[]>(
+        "SELECT * FROM categories WHERE id = ?",
+        [result.insertId],
+      );
+
+      return {
+        success: true,
+        data: newCategory[0] as Category,
+        message: "Category created successfully",
+      };
+    } catch (error) {
+      console.error("Error creating category:", error);
+      throw error;
     }
-
-    return {
-      success: true,
-      message: "Category deleted successfully",
-    };
-  } catch (error) {
-    console.error("Error deleting category:", error);
-    throw error;
   }
-}
+
+  static async updateCategory(
+    id: number,
+    category: Partial<Omit<Category, "id" | "created_at" | "updated_at">>,
+  ): Promise<ApiResponse<Category>> {
+    try {
+      const [result] = await pool.execute<ResultSetHeader>(
+        "UPDATE categories SET name = ?, description = ?",
+        [category.name, category.description],
+      );
+
+      if (result.affectedRows === 0) {
+        throw new Error("Category not found");
+      }
+
+      const [updatedCategory] = await pool.execute<RowDataPacket[]>(
+        "SELECT * FROM categories WHERE id = ?",
+        [id],
+      );
+
+      return {
+        success: true,
+        data: updatedCategory[0] as Category,
+        message: "Category updated successfully",
+      };
+    } catch (error) {
+      console.error("Error updating category:", error);
+      throw error;
+    }
+  }
+
+  static async deleteCategory(id: number): Promise<ApiResponse<void>> {
+    try {
+      const [result] = await pool.execute<ResultSetHeader>(
+        "DELETE FROM categories WHERE id = ?",
+        [id],
+      );
+
+      if (result.affectedRows === 0) {
+        throw new Error("Category not found");
+      }
+
+      return {
+        success: true,
+        message: "Category deleted successfully",
+      };
+    } catch (error) {
+      console.error("Error deleting category:", error);
+      throw error;
+    }
+  }
   // Units operations
   static async getUnits(): Promise<ApiResponse<Unit[]>> {
     try {
@@ -798,16 +866,16 @@ static async deleteCategory(id: number): Promise<ApiResponse<void>> {
       }
 
       // Use string interpolation for LIMIT and OFFSET to avoid MySQL2 parameter binding issues
-      const limitInt = Math.max(1, Math.min(1000, parseInt(limit.toString()) || 10));
+      const limitInt = Math.max(
+        1,
+        Math.min(1000, parseInt(limit.toString()) || 10),
+      );
       const offsetInt = Math.max(0, parseInt(offset.toString()) || 0);
       query += ` ORDER BY i.created_at DESC LIMIT ${limitInt} OFFSET ${offsetInt}`;
-      
+
       const countParams = search ? [`%${search}%`, `%${search}%`] : [];
 
-      const [invoices] = await pool.execute<RowDataPacket[]>(
-        query,
-        params,
-      );
+      const [invoices] = await pool.execute<RowDataPacket[]>(query, params);
       const [countResult] = await pool.execute<RowDataPacket[]>(
         countQuery,
         countParams,
@@ -1079,16 +1147,16 @@ static async deleteCategory(id: number): Promise<ApiResponse<void>> {
       }
 
       // Use string interpolation for LIMIT and OFFSET to avoid MySQL2 parameter binding issues
-      const limitInt = Math.max(1, Math.min(1000, parseInt(limit.toString()) || 10));
+      const limitInt = Math.max(
+        1,
+        Math.min(1000, parseInt(limit.toString()) || 10),
+      );
       const offsetInt = Math.max(0, parseInt(offset.toString()) || 0);
       query += ` ORDER BY q.created_at DESC LIMIT ${limitInt} OFFSET ${offsetInt}`;
-      
+
       const countParams = search ? [`%${search}%`, `%${search}%`] : [];
 
-      const [quotations] = await pool.execute<RowDataPacket[]>(
-        query,
-        params,
-      );
+      const [quotations] = await pool.execute<RowDataPacket[]>(query, params);
       const [countResult] = await pool.execute<RowDataPacket[]>(
         countQuery,
         countParams,
@@ -1546,14 +1614,16 @@ static async deleteCategory(id: number): Promise<ApiResponse<void>> {
   // }
 
   // Usage check methods for delete restrictions
-  static async checkCustomerUsage(customerId: number): Promise<ApiResponse<{ canDelete: boolean; usageDetails: string[] }>> {
+  static async checkCustomerUsage(
+    customerId: number,
+  ): Promise<ApiResponse<{ canDelete: boolean; usageDetails: string[] }>> {
     try {
       const usageDetails: string[] = [];
 
       // Check if customer is used in invoices
       const [invoices] = await pool.execute<RowDataPacket[]>(
         "SELECT COUNT(*) as count FROM invoices WHERE customer_id = ?",
-        [customerId]
+        [customerId],
       );
       if (invoices[0].count > 0) {
         usageDetails.push(`${invoices[0].count} invoice(s)`);
@@ -1562,7 +1632,7 @@ static async deleteCategory(id: number): Promise<ApiResponse<void>> {
       // Check if customer is used in quotations
       const [quotations] = await pool.execute<RowDataPacket[]>(
         "SELECT COUNT(*) as count FROM quotations WHERE customer_id = ?",
-        [customerId]
+        [customerId],
       );
       if (quotations[0].count > 0) {
         usageDetails.push(`${quotations[0].count} quotation(s)`);
@@ -1572,9 +1642,12 @@ static async deleteCategory(id: number): Promise<ApiResponse<void>> {
         success: true,
         data: {
           canDelete: usageDetails.length === 0,
-          usageDetails
+          usageDetails,
         },
-        message: usageDetails.length === 0 ? "Customer can be deleted" : "Customer is being used"
+        message:
+          usageDetails.length === 0
+            ? "Customer can be deleted"
+            : "Customer is being used",
       };
     } catch (error) {
       console.error("Error checking customer usage:", error);
@@ -1582,14 +1655,16 @@ static async deleteCategory(id: number): Promise<ApiResponse<void>> {
     }
   }
 
-  static async checkCategoryUsage(categoryId: number): Promise<ApiResponse<{ canDelete: boolean; usageDetails: string[] }>> {
+  static async checkCategoryUsage(
+    categoryId: number,
+  ): Promise<ApiResponse<{ canDelete: boolean; usageDetails: string[] }>> {
     try {
       const usageDetails: string[] = [];
 
       // Check if category is used in products
       const [products] = await pool.execute<RowDataPacket[]>(
         "SELECT COUNT(*) as count FROM products WHERE category_id = ?",
-        [categoryId]
+        [categoryId],
       );
       if (products[0].count > 0) {
         usageDetails.push(`${products[0].count} product(s)`);
@@ -1599,9 +1674,12 @@ static async deleteCategory(id: number): Promise<ApiResponse<void>> {
         success: true,
         data: {
           canDelete: usageDetails.length === 0,
-          usageDetails
+          usageDetails,
         },
-        message: usageDetails.length === 0 ? "Category can be deleted" : "Category is being used"
+        message:
+          usageDetails.length === 0
+            ? "Category can be deleted"
+            : "Category is being used",
       };
     } catch (error) {
       console.error("Error checking category usage:", error);
@@ -1609,14 +1687,16 @@ static async deleteCategory(id: number): Promise<ApiResponse<void>> {
     }
   }
 
-  static async checkUnitUsage(unitId: number): Promise<ApiResponse<{ canDelete: boolean; usageDetails: string[] }>> {
+  static async checkUnitUsage(
+    unitId: number,
+  ): Promise<ApiResponse<{ canDelete: boolean; usageDetails: string[] }>> {
     try {
       const usageDetails: string[] = [];
 
       // Check if unit is used in products
       const [products] = await pool.execute<RowDataPacket[]>(
         "SELECT COUNT(*) as count FROM products WHERE unit = (SELECT name FROM units WHERE id = ?)",
-        [unitId]
+        [unitId],
       );
       if (products[0].count > 0) {
         usageDetails.push(`${products[0].count} product(s)`);
@@ -1626,9 +1706,12 @@ static async deleteCategory(id: number): Promise<ApiResponse<void>> {
         success: true,
         data: {
           canDelete: usageDetails.length === 0,
-          usageDetails
+          usageDetails,
         },
-        message: usageDetails.length === 0 ? "Unit can be deleted" : "Unit is being used"
+        message:
+          usageDetails.length === 0
+            ? "Unit can be deleted"
+            : "Unit is being used",
       };
     } catch (error) {
       console.error("Error checking unit usage:", error);

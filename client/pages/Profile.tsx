@@ -25,7 +25,7 @@ interface UserProfile {
   email: string;
   //   mobile?: string
   gender?: "male" | "female" | "other";
-  date_of_birth?: string;
+  dob?: string;
   address?: string;
   country?: string;
   state?: string;
@@ -37,12 +37,18 @@ interface UserProfile {
 }
 
 const Profile: React.FC = () => {
+  const normalizeDob = (value?: string) => {
+    if (!value) return "";
+    // Accepts ISO strings or date strings; returns YYYY-MM-DD
+    if (value.length >= 10) return value.substring(0, 10);
+    return value;
+  };
   const [profile, setProfile] = useState<UserProfile>({
     name: "",
     email: "",
     // mobile: '',
     gender: undefined,
-    date_of_birth: "",
+    dob: "",
     address: "",
     country: "",
     state: "",
@@ -58,14 +64,43 @@ const Profile: React.FC = () => {
   useEffect(() => {
     const fetchProfile = async () => {
       try {
+        // Determine current userId
+        const currentUserRaw = localStorage.getItem("currentUser");
+        const currentUser = currentUserRaw ? JSON.parse(currentUserRaw) : null;
+        const userId: number | undefined = currentUser?.id ?? profile.id;
+
+        if (!userId) {
+          throw new Error("No user id available");
+        }
+
         // Try to fetch from API first
-        const response = await fetch("/api/profile");
+        const response = await fetch(`/api/profile/${userId}`);
         if (response.ok) {
           const result = await response.json();
 
           if (result.success && result.data) {
-            setProfile(result.data);
-            setProfileImage(result.data.profile_image || "");
+            const user = result.data.user || {};
+            const prof = result.data.profile || {};
+            const genderLower = prof.gender ? String(prof.gender).toLowerCase() : undefined;
+            const genderNormalized: UserProfile["gender"] =
+              genderLower === "male" || genderLower === "female" || genderLower === "other"
+                ? genderLower
+                : undefined;
+            const mergedProfile: UserProfile = {
+              id: user.id ?? prof.id,
+              name: user.name ?? "",
+              email: user.email ?? "",
+              gender: genderNormalized,
+              dob: normalizeDob(prof.dob || ""),
+              address: prof.address || "",
+              country: prof.country || "",
+              state: prof.state || "",
+              city: prof.city || "",
+              postal_code: prof.postal_code || "",
+              profile_image: prof.profile_image || "",
+            };
+            setProfile(mergedProfile);
+            setProfileImage(mergedProfile.profile_image || "");
           }
         } else {
           throw new Error("API not available");
@@ -92,7 +127,7 @@ const Profile: React.FC = () => {
               email: userData.email || "",
               //   mobile: '',
               gender: undefined,
-              date_of_birth: "",
+              dob: "",
               address: "",
               country: "",
               state: "",
@@ -108,12 +143,12 @@ const Profile: React.FC = () => {
           } else {
             // Set default sample data as last resort
             const defaultProfile = {
-              name: "Admin User",
-              email: "admin@kanakku.com",
+              name: " ",
+              email: " ",
               //   mobile: '+1-555-0001',
               gender: "male" as const,
-              date_of_birth: "1990-01-01",
-              address: "123 Admin Street",
+              dob: "",
+              address: " ",
               country: " ",
               state: " ",
               city: " ",
@@ -158,26 +193,51 @@ const Profile: React.FC = () => {
   const handleSaveChanges = async () => {
     setIsSaving(true);
     try {
-      const endpoint = profile.id
-        ? `/api/profile/${profile.id}`
-        : "/api/profile";
-      const method = profile.id ? "PUT" : "POST";
+      // Determine current userId
+      const currentUserRaw = localStorage.getItem("currentUser");
+      const currentUser = currentUserRaw ? JSON.parse(currentUserRaw) : null;
+      const userId: number | undefined = currentUser?.id ?? profile.id;
+      if (!userId) {
+        throw new Error("No user id available");
+      }
 
-      const response = await fetch(endpoint, {
-        method,
+      const payload = {
+        name: profile.name,
+        profile_image: profile.profile_image,
+        gender: profile.gender,
+        dob: normalizeDob(profile.dob) || null,
+        address: profile.address,
+        country: profile.country,
+        state: profile.state,
+        city: profile.city,
+        postal_code: profile.postal_code,
+      };
+
+      const response = await fetch(`/api/profile/${userId}`, {
+        method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(profile),
+        body: JSON.stringify(payload),
       });
 
+      const result = await response.json().catch(() => ({}));
       if (response.ok) {
-        const result = await response.json();
 
         if (result.success) {
-          if (result.data) {
-            setProfile(result.data);
-          }
+          // result.data is the saved profile row
+          const saved = result.data || {};
+          setProfile((prev) => ({
+            ...prev,
+            gender: saved.gender,
+            dob: saved.dob || "",
+            address: saved.address || "",
+            country: saved.country || "",
+            state: saved.state || "",
+            city: saved.city || "",
+            postal_code: saved.postal_code || "",
+            profile_image: saved.profile_image || prev.profile_image,
+          }));
           toast({
             title: "Success",
             description: "Profile updated successfully",
@@ -187,23 +247,15 @@ const Profile: React.FC = () => {
           throw new Error(result.message || "Failed to save profile");
         }
       } else {
-        throw new Error("API not available");
+        throw new Error(result?.error || "API request failed");
       }
     } catch (error) {
-      console.log("API not available, saving to local storage");
-      // Fallback to local storage
-      const updatedProfile = {
-        ...profile,
-        id: profile.id || 1,
-        updated_at: new Date(),
-      };
-      setProfile(updatedProfile);
-      localStorage.setItem("userProfile", JSON.stringify(updatedProfile));
-
+      console.error("Save failed:", error);
       toast({
-        title: "Success",
-        description: "Profile saved locally (Database not available)",
-        variant: "default",
+        title: "Save failed",
+        description:
+          error instanceof Error ? error.message : "Unable to save profile",
+        variant: "destructive",
       });
     } finally {
       setIsSaving(false);
@@ -236,7 +288,7 @@ const Profile: React.FC = () => {
               General Information
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-6">
+          <CardContent className="space-y-6 ">
             {/* Profile Image */}
             <div className="space-y-2">
               <Label>Profile Image</Label>
@@ -274,7 +326,7 @@ const Profile: React.FC = () => {
             </div>
 
             {/* Form Fields Row 1 */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="name">Name *</Label>
                 <Input
@@ -329,12 +381,10 @@ const Profile: React.FC = () => {
                   <Input
                     id="dob"
                     type="date"
-                    value={profile.date_of_birth || ""}
-                    onChange={(e) =>
-                      handleInputChange("date_of_birth", e.target.value)
-                    }
+                    value={profile.dob || ""}
+                    onChange={(e) => handleInputChange("dob", e.target.value)}
                   />
-                  <Calendar className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  {/* <Calendar className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" /> */}
                 </div>
               </div>
             </div>
@@ -421,7 +471,7 @@ const Profile: React.FC = () => {
         <div className="flex justify-end gap-4">
           <Button variant="outline" size="lg">
             Cancel
-          </Button>``
+          </Button>
           <Button
             onClick={handleSaveChanges}
             disabled={isSaving}

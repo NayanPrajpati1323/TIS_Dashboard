@@ -178,11 +178,10 @@ export interface PaginatedResponse<T = any> {
 }
 export interface Profile {
   id: number;
-  profile_image?: string; // optional
-  name: string;
-  email: string;
-  gender: "Male" | "Female" | "Other";
-  dob: string; // ISO date string: YYYY-MM-DD
+  user_id: number;
+  profile_image?: string;
+  gender?: "male" | "female" | "other";
+  dob?: string; // ISO date string: YYYY-MM-DD
   address?: string;
   country?: string;
   state?: string;

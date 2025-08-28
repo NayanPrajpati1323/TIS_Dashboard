@@ -39,11 +39,39 @@ export default function Register() {
       return;
     }
 
-    setTimeout(() => {
+    try {
+      const response = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          password: formData.password,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err?.error || 'Registration failed');
+      }
+
+      const result = await response.json();
+      if (result?.success && result?.data) {
+        localStorage.setItem('isAuthenticated', 'true');
+        localStorage.setItem('currentUser', JSON.stringify(result.data));
+        if (result.data.id) {
+          localStorage.setItem('userId', String(result.data.id));
+        }
+        navigate('/');
+      } else {
+        throw new Error(result?.error || 'Invalid registration response');
+      }
+    } catch (err) {
+      console.error('Registration error:', err);
+      alert(err instanceof Error ? err.message : 'Registration failed');
+    } finally {
       setIsLoading(false);
-      localStorage.setItem("isAuthenticated", "true");
-      navigate("/");
-    }, 1000);
+    }
   };
 
   const handleGoogleRegister = () => {
